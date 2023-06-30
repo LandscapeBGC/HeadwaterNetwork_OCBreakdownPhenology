@@ -1,0 +1,384 @@
+---
+title: "Supplemental Material 1: Organic Carbon Sampling Details"
+date: "2023-06-22"
+output:
+  html_document:
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r library, include=FALSE}
+source("./packages.R")
+```
+
+## Leaf litter inputs and standing stock 
+Daily leaf litter inputs were determined through sampling both direct litter and lateral litter inputs for two stream reaches within the basin (‘detailed carbon sites’ in Figure 1A), following the methods of Benstead et al. (2009). Ten direct-fall traps (0.25 m2) and 12 lateral traps (0.5 m long X 0.2 m high X 0.3 m deep) were placed along each of the two stream reaches (150m). For both methods, inputs were collected along each stream approximately monthly from November 2017 to October 2020, and the collected organic matter was sorted into leaf and non-leaf particulate organics. The collected organic matter was oven-dried (60°C for 5 days) then ashed (500°C for 1–4 hours). Ash-free dry mass (AFDM) was calculated as the difference between the ash mass and oven-dried mass. Direct litter inputs were converted into an areal estimate (AFDM/m2) by dividing by the trap area, and lateral litter inputs were converted to an estimate per unit stream length by the AFDM dividing by length of traps (AFDM/m). We determined daily litterfall inputs per streambed area and lateral inputs per stream meter by calculating the 7-day rolling mean (Supplemental 1 - Figure 1). We converted AFDM to grams of carbon per day (gC) by using the conversion 0.484 Lamberti (2021). 
+
+```{r SM1_Figure1_Input}
+#Read RAW Data
+file_direct <- "data/direct_OCinputs_CoweetaNC.csv"
+file_lateral <- "data/lateral_OCinputs_CoweetaNC.csv"
+POM_direct <- read.csv(file_direct)
+POM_direct$sample.date <- as.Date(POM_direct$sample.date, "%Y-%m-%d")
+POM_lateral <- read.csv(file_lateral)
+POM_lateral$sample.date <- as.Date(POM_lateral$sample.date, "%Y-%m-%d")
+
+### Process Data
+#Summarize direct data into avg, but keep two basins separate
+PD_day <- POM_direct%>%
+  filter(organic.matter.fraction == "LEAF") %>%
+  dplyr::select("sample.date", "sample.mo", "trap.no","stream", "areal.AFDM.input.g.m2.d")%>%
+  mutate(Jdate = yday(sample.date)) %>%
+  group_by(Jdate) %>%
+  summarise(
+    direct_gm2d_avg = round(mean(areal.AFDM.input.g.m2.d),2),
+    direct_gm2d_sd = round(sd(areal.AFDM.input.g.m2.d),2)
+  )%>%
+  drop_na(direct_gm2d_avg)
+
+#Summarize lateral data into avg, but keep basins separate
+PL_day <- POM_lateral%>%
+  filter(organic.matter.fraction == "LEAF") %>%
+  dplyr::select("sample.date", "sample.mo", "trap.no","stream", "areal.AFDM.input.g.m.d")%>%
+  mutate(Jdate = yday(sample.date)) %>%
+  group_by(Jdate) %>%
+  summarise(
+    lateral_gmd_avg = round(mean(areal.AFDM.input.g.m.d),2),na.rm=TRUE,
+    lateral_gmd_sd = round(sd(areal.AFDM.input.g.m.d),2),na.rm=TRUE
+  )%>%
+  drop_na(lateral_gmd_avg)
+
+dates <- data.frame(Jdate = seq(1,365))
+
+cIn_Obs <- left_join(PD_day, PL_day, by = "Jdate") %>%
+  mutate(Cin_gm2d = (lateral_gmd_avg * 2) + direct_gm2d_avg)
+
+cIn_rollmean <- left_join(PD_day, PL_day, by = "Jdate") %>%
+  left_join(dates, .) %>%
+  mutate( ##rule 2 to extrapolate as a constant value of the nearest extreme
+        Cdirect_gm2hr = if_else(direct_gm2d_avg/24 < 0, 0, direct_gm2d_avg/24),
+        Clateral_gmhr = if_else(lateral_gmd_avg/24 < 0, 0, lateral_gmd_avg/24),
+        Cdirect_gm2hr = rollapply(Cdirect_gm2hr, width = 7, FUN= mean, partial = TRUE, na.rm = TRUE ),
+         Cin_gm2hr_d_int = zoo::na.approx(Cdirect_gm2hr, rule =2),
+         Cin_gm2hr_d_all = zoo::rollmean(Cin_gm2hr_d_int, k = 7, na.pad = TRUE, align = "left"), #na at the end 
+         Cdirect_gm2hr_ = if_else(is.na(Cin_gm2hr_d_all) == TRUE, (0.2/24+0.7/24)/2 , Cin_gm2hr_d_all), #if na avaerage last december and first jan values
+         #lateral
+         Clateral_gmhr = rollapply(Clateral_gmhr, width = 7, FUN= mean, partial = TRUE, na.rm = TRUE ),
+         Cin_gmhr_l_int = zoo::na.approx(Clateral_gmhr, rule =2),
+         Cin_gmhr_l_all = zoo::rollmean(Cin_gmhr_l_int, k = 7, na.pad = TRUE, align = "left"), #na at the end 
+         Clateral_gmhr_ = if_else(is.na(Cin_gmhr_l_all) == TRUE, (1.26/24 + 0.45/24)/2 , Cin_gmhr_l_all)) #if na avaerage last december and first jan values
+
+#Input Data for Network Model
+saveRDS(cIn_rollmean, "data/output/POM_In.RDS")
+
+##Create Plot
+colors <- c("Lateral Litter Input" = "black", "Direct Litterfall Input" = "blue",
+            "Interpolated Lateral Input" = "green", "Interpolated Direct Input" = "lightblue")
+
+ggplot()+
+  #geom_line(data = cIn, aes(x = Jdate, y = Cin_gm2d))+
+  geom_point(data = cIn_rollmean, aes(Jdate, Clateral_gmhr_, color = "Interpolated Lateral Input"))+
+  geom_point(data = cIn_Obs, aes(Jdate, lateral_gmd_avg/24, color = "Lateral Litter Input"))+
+  geom_point(data = cIn_rollmean, aes(Jdate, Cdirect_gm2hr_, color = "Interpolated Direct Input"))+
+  geom_point(data = cIn_Obs, aes(Jdate, direct_gm2d_avg/24, color = "Direct Litterfall Input"))+
+scale_y_continuous(
+  # Features of the first axis
+  #xlab(bquote('Assimilation ('*mu~ 'mol' ~CO[2]~ m^-2~s^-1*')'))
+  name = bquote('POC Lateral Input '(~gm^-1~hr^-1)),
+  
+  # Add a second axis and specify its features
+  sec.axis = sec_axis(~., name=bquote('POC Litterfall Direct Input '(~g~m^2~hr^-1)))
+)+
+  theme_bw(base_size = 10)+
+  labs( x= "Day of Year",
+        color = "Legend") +
+  ggtitle("S1: Figure 1", subtitle = "Coweeta Creek Leaf Litter Input")+
+  scale_color_manual(values = colors)
+```
+
+We evaluated the litter inputs as either completely R.maximum (slow-rate) or completely A.rubrum (fast-rate) to  capture the range of litter types typical of temperate broadleaf deciduous forests. We model one additional litter-rate scenario referred to as ‘mixed’, which portions daily litter inputs into slow-rate or fast-rate to represent the type of litter contributing monthly based on Figure 1 of Webster et al (2001) and fit with a spline to provide daily percent input of slow-rate and fast-rate independently, as a means to provide a more representative model estimate of standing stock within a mixed forest. Within their work "Acer" was considered to have a "medium" breakdown rate and Rhododendron to have a "very-slow" breakdown rate. The "slow" percentage of direct litterfall shown that is based on the Webster et al. (2001) "very slow" to best capture observed Rhododendron litter inputs. These observations are summarized to daily proportions (maximum 100%) using a M-spline function (Supplemental 1 - Figure 2). These results are used to parameterize the litter inputs and standing stock for the "Observed Stream Temperature" Network Model Scenario and approximate the amount of "slow" versus "fast" litter than contributes to streams for any given day of year (Supplemental 1 - Figure 3). 
+
+```{r}
+
+percentsp_IN <- read_csv("C:/Users/hared/Dropbox/UConn/Projects/500_NetworkScaleCarbon/520_Data/Webster_2001_PercentDirectSpecies.csv", 
+                                              col_types = cols(date = col_date(format = "%m/%d/%Y"), 
+                                                               type = col_factor(levels = c("med", 
+                                                                                            "vslow")), percent_group = col_number())) %>%
+  mutate(Jdate = yday(date),
+         percent_group = percent_group/100)
+
+cbom_species <- percentsp_IN %>%
+  dplyr::filter(type == "vslow") %>%
+  lm(percent_group ~ mSpline(x = Jdate,
+                                             df = 4,
+                                             periodic = TRUE,
+                                             Boundary.knots = c(1, 365)), data = .)
+
+cbom_year <- data.frame(Jdate = seq(1:365))
+#Predict Daily Areal Standing Stock - Core Data
+cbom_pred_perlow <- data.frame(Jdate = as.numeric(seq(1:365)), percent_low = predict(cbom_species, cbom_year, interval = "prediction"))
+speciesperc <- read_rds("data/output/POM_In_speciesperc.RDS")
+
+
+percentsp_IN %>%
+dplyr::filter(type == "vslow") %>%
+ggplot(.) +
+  geom_point(aes(x = Jdate, y = percent_group))+
+  geom_line(data = cbom_pred_perlow, aes(x = Jdate, y = percent_low.fit), color = "black")+
+  scale_y_continuous(
+    name = "Proportion Slow Litter"
+  )+
+  theme_bw(base_size = 10)+
+  labs(x= "Day of Year")+
+  ggtitle("S1: Figure 2", subtitle = "Proportion Coweeta Creek Slow-Rate Leaf Litterfall Input")
+
+```
+
+
+```{r}
+results_df <- read_rds("results/network_model_output_daily.RDS")%>%
+  mutate(Jdate = yday(date))%>%
+  left_join(., speciesperc)
+
+
+colors <- c("Fast Litter Contribution" = "black",
+            "Slow Litter Contribution" = "darkgreen")
+
+results_df %>%
+  dplyr::filter(date_d > as.Date("2019-07-31", format = "%Y-%m-%d") & date_d < as.Date("2020-07-31", format = "%Y-%m-%d")) %>%
+  mutate( date_d = as.Date(date_d, format = "%Y-%m-%d")) %>%
+  ggplot(.)+
+  geom_ribbon(aes(x = date_d, ymin = 0, ymax = C_LitterIn_gC*percent_low.fit/1000, fill = "Slow Litter Contribution"), size = 0.5, alpha = 0.8)+
+  geom_ribbon(aes(date_d, ymin = C_LitterIn_gC*percent_low.fit/1000, ymax = (C_LitterIn_gC)/1000, fill = "Fast Litter Contribution"), alpha = 0.8)+
+  #geom_line(aes(date_d, C_StStock_gC, group = scenario, color = scenario))+
+  #scale_color_manual(values= scen_colors_mix)+
+  labs(x = "", y = "POC Input (kg C /day)", fill = "")+
+  theme_bw(base_size = 8)+
+  scale_fill_manual(values = colors)+
+  scale_x_date(date_labels="%b",date_breaks  ="1 month")+
+  theme(legend.position = "bottom",
+        legend.direction = "horizontal",
+        legend.background = element_rect(fill = NA, color = "black"),
+        axis.text.x = element_text(angle = 45, vjust = 0.9, hjust=1),
+        strip.text.y = element_blank())+
+  ggtitle("S1: Figure 3", subtitle ="Mixed Litter Input Proportions" )+
+  guides(color=guide_legend(ncol=1))
+
+
+```
+
+
+## Standing Stock Calculation 
+
+We used two methods to calculate areal measures of standing stocks, benthic cores at stream reaches across the basin and additional leaf transects at two of the streams reaches. Our observed standing stocks are based on leaf coarse components (> 1mm) of 199 leaf transect measurements from the ‘detailed carbon sites’ (Figure 1A) and 656 core samples: 668, 350 from watersheds the ‘detailed carbon sites’, and 318 from the 20 ‘landscape sites’ (Figure 1A).
+
+The core method deployed either a 490cm2 or 380cm2 benthic corer to a target depth of 10cm, and all coarse material was removed by hand. Two benthic core datasets were integrated: (1) ‘landscape sites’ (Figure 1A) were collected from each stream quarterly (Jan, April, July, October) for one year, either 2018 or 2019. Each stream was delineated into four blocks within the survey reach and one core was randomly collected within each block. (2) For the two ‘detailed carbon sites’ for each sample event five cores were randomly selected along the reach, and collected monthly from May 2018 through March 2021 (excluding March 2020). 
+
+The leaf transect method was conducted for 10 sampling events, monthly from October 2017 through July 2018. During each sampling event ten transects were taken at two stream reaches, with locations chosen by block randomization. The area of each transect was determined by the length of the wetted width by 0.15 m stream length. For each transect all visible organic material was collected and rinsed. For both the cores and leaf transects methods, collected coarse organic matter was separated by hand and classified as either leaves, wood, or other. For this study, any collected material identified as “leaves” was considered size class coarse (>1mm). Date of collection was converted to day of year, and then daily standing stock measurements are approximated using a periodic M-spline interpolation using the ‘Spline2’ R Package (Wang 2021)(Supplemental 1 - Figure 4).     
+
+```{r}
+#Whole Stream Data
+llsc <- read.csv("data/paired.llsc.data_processed.csv") %>%
+  mutate(stream = ifelse(stream == "ref", "WS55", "TOWR"),
+         date = as.Date(sample.date, "%Y-%m-%d"),
+         OM_Type = ifelse(category== "leaves", "LEAF", category),
+         tech = "UGA") %>%
+  dplyr::select(date, stream, OM_Type, areal.afdm.gm2, sample.mo, tech)
+
+cbom <- read.csv("data/monthly_core_coarse_OM.csv") %>%
+  mutate(areal.afdm.gm2 = (Dry_Mass - Ashed)/0.049, #core area 490 cm^2
+         stream = Stream,
+         date = as.Date(Sample_Date, "%m/%d/%Y"),
+         sample.mo = month(date),
+         tech = "UA",
+         Jdate = yday(date)) %>%
+  dplyr::select(Jdate, stream, OM_Type, areal.afdm.gm2, sample.mo, tech) %>%
+  dplyr::filter(OM_Type == "LEAF")
+
+  
+leaf_tr <- rbind(llsc)%>%#cbom)%>% #, #leaf transects
+  dplyr::filter(OM_Type == "LEAF") %>%
+  mutate(Jdate = yday(date),
+         areal.afdm.gm2 = ifelse(areal.afdm.gm2 < 0, NA, areal.afdm.gm2)) %>%
+  dplyr::select(-date)%>%
+  drop_na()
+
+
+cbom_lscp <- read.csv("data/landscape_cbom_calculations_master_31Oct2020.csv") %>%
+  mutate(date = as.Date(sample.date, format = "%m/%d/%Y"),
+         Jdate = yday(date),
+         tech = "UGA",
+         OM_Type = om.category,
+         areal.afdm.gm2 = cbom.afdm.g.m2) %>%
+  dplyr::select(Jdate, stream, OM_Type, areal.afdm.gm2, sample.mo, tech)%>%
+  dplyr::filter(OM_Type == "LEAF")
+
+leaf_core <- rbind(cbom, cbom_lscp)%>% #, #leaf transects
+  dplyr::filter(OM_Type == "LEAF") %>%
+  mutate(areal.afdm.gm2 = ifelse(areal.afdm.gm2 < 0, NA, areal.afdm.gm2)) %>%
+  drop_na() 
+
+
+#fit based on core data
+cbom_core_fit <- lm(areal.afdm.gm2 ~ mSpline(x = Jdate,
+                                               df = 4,
+                                               periodic = TRUE,
+                                               Boundary.knots = c(1, 365)), data = leaf_core) #like this better than gam to fit the periodic nature of the signal
+#fit based on leaf transect data
+cbom_tr_fit <- lm(areal.afdm.gm2 ~ mSpline(x = Jdate,
+                                             df = 4,
+                                             periodic = TRUE,
+                                             Boundary.knots = c(1, 365)), data = leaf_tr) 
+
+cbom_year <- data.frame(Jdate = seq(1:365))
+
+
+
+#Predict Daily Areal Standing Stock - Core Data
+cbom_pred_core <- data.frame(Jdate = as.numeric(seq(1:365)), cbom_AFDM_gm2 = predict(cbom_core_fit, cbom_year, interval = "prediction")) %>%
+  mutate(
+    cbom_gC_m2 = cbom_AFDM_gm2.fit * 0.484
+  )
+#Predict Daily Areal Standing Stock - Transect Dtaa
+cbom_pred_tr <- data.frame(Jdate = as.numeric(seq(1:365)), cbom_AFDM_gm2 = predict(cbom_tr_fit, cbom_year, interval = "prediction")) %>%
+  mutate(
+    cbom_gC_m2 = cbom_AFDM_gm2.fit * 0.484
+  )
+
+#95% Confidence Interval for Daily Areal Standing Stock - Core Data
+cbom_confi_core <- data.frame(Jdate = as.numeric(seq(1:365)), cbom_AFDM_gm2 = predict(cbom_core_fit, cbom_year, interval = "confidence")) %>%
+  mutate(
+    cbom_gC_m2 = cbom_AFDM_gm2.fit * 0.484)
+
+#95% Confidence Interval for Daily Areal Standing Stock - Transect Data
+cbom_confi_tr <- data.frame(Jdate = as.numeric(seq(1:365)), cbom_AFDM_gm2 = predict(cbom_tr_fit, cbom_year, interval = "confidence")) %>%
+  mutate(
+    cbom_gC_m2 = cbom_AFDM_gm2.fit * 0.484)
+
+
+## Save Data
+saveRDS(cbom_confi_core, "data/output/cbom_confi_core.RDS")
+saveRDS(cbom_confi_tr, "data/output/cbom_confi_tr.RDS")
+saveRDS(cbom_pred_core, "data/output/cbom_pred_core.RDS")
+saveRDS(cbom_pred_tr, "data/output/cbom_pred_tr.RDS")
+
+##Create Plot
+colors <- c("Leaf Transect Method" = "blue", "Benthic Core Method" = "red")
+
+ggplot() +
+  geom_point(data = leaf_tr, aes(x = Jdate, y = areal.afdm.gm2, color = "Leaf Transect Method"))+
+  geom_point(data = leaf_core, aes(x = Jdate, y = areal.afdm.gm2, color = "Benthic Core Method"))+
+  geom_line(data = cbom_pred_core, aes(x = Jdate, y = cbom_AFDM_gm2.fit, color = "Benthic Core Method"))+
+  geom_line(data = cbom_pred_tr, aes(x = Jdate, y = cbom_AFDM_gm2.fit, color = "Leaf Transect Method"))+
+
+  scale_y_continuous(
+    name = bquote('CPOC Standing Stock ('~AFDM~m^-2 *")"),
+    
+    # Add a second axis and specify its features
+    sec.axis = sec_axis(~.*0.484, name=bquote('CPOC Standing Stock (gC'~m^-2 *')'))
+  )+
+  theme_bw(base_size = 10)+
+  labs( x= "Day of Year",
+      color = "Legend") +
+  scale_color_manual(values = colors)+
+    ggtitle("S1: Figure 4", subtitle ="CPOC Standing Stock Field Areal Measurments" )
+
+
+```
+
+
+## Groundwater dissolved organic carbon
+
+Groundwater DOC concentrations were measured at groundwater seeps at two streams (TOWR and WS55 ‘detailed carbon sites’ on Figure 1A), from Rosemond et al. (2015).  All stream sample water was collected from two known groundwater discharges by placing a sampling syringe as close to the seep location as possible. Additionally, we made use of Coweeta Watershed historical seep DOC data from Meyer and Tate (2003) from WS07 and WS14. Even though WS14 was clear cut the DOC seep there was not a detectable  effect on groundwater and these data were used in averages. A comparison of the groundwater seep concentrations between watersheds and included studies are shown below (Supplemental 1 - Figure 5). All these data were combined and averaged based on sampling month, which were the values used for GW DOC model input (Supplemental 1 - Figure 6 and Table 1).
+
+
+```{r}
+###--- Read Contemporary Data
+DOC_master <- read.csv("data/DOC_master_sheet.csv")
+DOC_master$position.in.stream <- as.factor(DOC_master$position.in.stream) # to facilitate sorting
+DOC_master$stream <- as.factor(DOC_master$stream) # to faciliate sorting
+DOC_master$date <- as.Date(DOC_master$sample.date, "%Y-%m-%d") #clean up date structure
+# order by glass and plastic so duplicates can be removed, glass will be used as it is first
+DOC_master <- DOC_master[order(DOC_master$glass.or.plastic),]
+
+#--- Filter data to only include seep data for baseflow analysis
+DOC_seep <- DOC_master %>%
+  filter(position.in.stream == "seep")
+
+# remove duplicates so only one per date per stream site
+DOC_seep<- DOC_seep[!duplicated(DOC_seep[c("sample.date","stream")]),]
+
+###--- Read Historic Data and structure dataframes
+DOC_WS14 <- read.csv("data/Meyer1983_Data_seepUndisturbed.csv", header = FALSE, col.names = c("date", "doc.ppm"))
+DOC_WS14$stream <- "WS14"
+DOC_WS14$date <- as.Date(DOC_WS14$date, format = "%Y/%m/%d")
+DOC_WS07_clearcut <- read.csv("data/Meyer1983_Data_seepclearcut.csv", header = FALSE, col.names = c("date", "doc.ppm"))
+DOC_WS07_clearcut$stream <-"WS07- Clearcut"
+DOC_WS07_clearcut$date <- as.Date(DOC_WS07_clearcut$date, format = "%Y/%m/%d")
+DOC_SNAX <- read.csv("data/DOC_Seep_5354.csv")
+DOC_SNAX$date <- as.Date(DOC_SNAX$Date, format = "%d-%b-%y")
+DOC_SNAX$doc.ppm <- as.numeric(DOC_SNAX$seep_ppb)/1000
+DOC_SNAX$seep_ppb <- NULL
+DOC_SNAX$Date <- NULL
+DOC_historic <- rbind(DOC_WS14, DOC_WS07_clearcut, DOC_SNAX)
+
+#add column with position in stream and wsname
+DOC_historic$position.in.stream <- "seep"
+
+###-- Combine DOC tables
+common_cols <- intersect(colnames(DOC_seep), colnames(DOC_historic))
+DOC_seep <- rbind(
+  DOC_seep[, common_cols], 
+  DOC_historic[, common_cols]
+)
+
+# Add Julian Days and Month Column 
+DOC_seep$JDate <- as.numeric(format.Date(DOC_seep$date," %j"))#add column with annual juilian day for comparing all data
+DOC_seep$mon <- as.numeric(format.Date(DOC_seep$date," %m"))
+
+####-- Plots
+DOC_seep %>%
+  ggplot() +
+  geom_violin(aes(stream, doc.ppm))+
+  geom_boxplot(aes(stream, doc.ppm),width = 0.1)+
+    labs(y = "DOC seep concentration (mg/L)",x = "Watershed Location")+
+    theme_bw(base_size = 10)+
+  ggtitle("S1: Figure 6", subtitle = "Dissolved Organic Carbon Seep Concentrations Quantiles")
+
+DOC_seep %>%
+  ggplot(aes(JDate, doc.ppm)) +
+  geom_point()+
+  geom_smooth()+
+  labs(y = "DOC seep concentration (mg/L)",x = "Day of Year")+
+  facet_wrap(~stream, scales = "free_x")+
+    theme_bw(base_size = 10)+
+  ggtitle("S1: Figure 6", subtitle = "Annual Patterns of Dissolved Organic Carbon Seep Concentrations")
+
+## Make a table for every Julian day to have mean and sd
+DOC_seep_table <- DOC_seep %>%
+  mutate(month = na.locf(mon, fromLast = TRUE)) %>% #fill missing months
+  dplyr::group_by(mon)%>%
+  dplyr::summarise(
+    doc_ppm_av = mean(doc.ppm, na.rm = TRUE),
+    doc_ppm_sd = sd(doc.ppm, na.rm = TRUE)
+  )
+
+DOC_seep_table%>%
+kbl(caption = "Supplemental 1 - Table 1: Monthly Statistics for Dissolved Organic Carbon Seep Concentrations in Coweeta Creek Watershed") %>%
+kable_classic(full_width = F, html_font = "Arial")
+
+## Used directly in model
+saveRDS(DOC_seep_table, "data/output/DOC_seep_table.RDS")
+
+
+
+
+```
+
+
+
+
+

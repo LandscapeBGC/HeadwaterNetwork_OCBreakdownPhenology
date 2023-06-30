@@ -1,0 +1,287 @@
+---
+title: 'Supplemental Material 4: Breakdown Rate Determination'
+author: "DHare"
+date: "2023-06-23"
+output:
+  html_document:
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r library, include=FALSE}
+source("R/packages.R")
+```
+
+
+```{r plot setup, include=FALSE}
+scen_colors_type <- c(
+    "#50C878",#acer
+  "#097969", #rhodo
+
+  "#E4D00A" #mixed
+)
+
+
+custom_color_type <- scale_color_manual(name = "",#name = "Thermal Regime", 
+                                      values = scen_colors_type,
+                                      labels = c('Acer','Rhodo', "Mixed")
+)
+
+
+```
+
+## Litter Bag Deployment
+
+Rhododendron maximum (Rhododendron) and Acer rubrum (Acer) leaves for collected from Coweeta 2017 and 2018, then air-dried, and seperated assembled fine-mesh (250-µm nylon mesh with 5.0g) and coarse-mesh (5-mm polypropylene mesh with 1.5g) bags. 
+
+Litterbags were deployed using an serial litterbag incubation approach (sensu Benstead and Huryn 2011, Wilmot et al. 2021), with an incubation period of approximately 60 days. Deployment days are shown in Table 1. 
+
+## Breakdown Rate Calculation  
+
+Mass loss was quantified (AFDM) from the bag as initial mass - remaining mass, with coarse-mesh initial mass adjusted for handling loss. Breakdown rate (k, day -1) for each deployment was calculated as the absolute value of the difference between log-transformed remaining mass percentage subtracted the log-transformed initial mass percentage (100%), divided by the days incubated. For each deployment measured stream temperature (C) and stream discharge(L s-1) were averaged over the deployment period. 
+
+The results of each set of replicates (>2) were averaged (breakdown rate (/d), stream temperature (C), and discharge) across the coarse and fine bags for each set of Acer and Rhododendron deployments. We separated mean breakdown values into six categories for analysis: Acer coarse-mesh, detritivores, and microbes; Rhododendron coarse-mesh, detritivores, and microbes. The portion of litter Detritivore-meditated breakdown (mean_k_shred_new) was estimated using methods from Lecerf (2017; Eq. 2). 
+
+```{r}
+# Read in raw temperature files 
+deploy_df <-  read_csv("https://raw.github.com/cscummins/Serial-leaf-litter-incubations/master/05_Litter_Breakdown_Analyses/all_si_lb_phys_chem_yr1_yr2_4Mar23.csv")%>%
+  dplyr::select(date_dep, date_coll, stream, rhodo_acer, N_coarse, N_fine, mean_k_fine, mean_k_shred_new, mean_k_coarse, mean_temp, mean_flow)%>%
+  mutate(across(where(is.numeric), round, 3),
+         month = month(date_dep, label = TRUE))
+
+deploy_df_month <- deploy_df %>%
+  na.omit()%>%
+  group_by(month, rhodo_acer) %>%
+  summarize(Microbial_k = mean(mean_k_fine, na.rm = TRUE),
+            Detritivore_k = mean(mean_k_shred_new, na.rm = TRUE),
+            StreamT_C = mean(mean_temp, na.rm = TRUE),
+            Flow_min_Ls = min(mean_flow, na.rm = TRUE),
+            Flow_max_Ls = max(mean_flow, na.rm = TRUE))%>%
+  mutate_at(3:4, round, 3)%>%
+  mutate_at(5:7, round, 1)
+
+
+ggplot(deploy_df)+
+  geom_boxplot(aes(x = month, y = mean_k_shred_new, group = interaction(month, rhodo_acer), color = rhodo_acer))+
+  custom_color_type+
+  labs(x = "") +#, y = bquote("Stream Temperature"~degree*C))+
+  theme_bw(base_size = 8)+
+  labs(x = "")+
+  #scale_x_date(date_labels="%b",date_breaks  ="1 month")+
+  scale_y_continuous(
+    # Features of the first axis
+    name = paste0("Detritivore Breakdown", "\n", "Rate Coefficient (day-1)")#bquote("Stream Temperature"~degree*C),
+    # Add a second axis and specify its features
+    #sec.axis = sec_axis(~.*coeff, name= paste0("Litter Input" , "\\\\n", "(kgC day-1)"))
+  ) +
+  #facet_grid(rows = "regime")+
+  theme(#legend.position = "none",
+        #axis.text.x=element_blank(),
+        #legend.position = c(0.5, 0.7),
+        legend.direction = "horizontal",
+        legend.background = element_rect(fill = NA, color = "black"),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1),
+        #strip.text.y = element_blank(),
+        #axis.title.y.left = element_text(colour="blue"),
+        # axis.title.y.right = element_text(colour="darkgreen"),
+        # axis.text.y.right = element_text(colour="darkgreen"))+
+  )+
+  guides(color=guide_legend(ncol=1))
+
+
+ggplot(deploy_df)+
+  geom_boxplot(aes(x = month, y = mean_k_fine, group = interaction(month, rhodo_acer), color = rhodo_acer))+
+  custom_color_type+
+  labs(x = "") +#, y = bquote("Stream Temperature"~degree*C))+
+  theme_bw(base_size = 8)+
+  labs(x = "")+
+  scale_y_continuous(
+    # Features of the first axis
+    name = paste0("Microbial Breakdown", "\n", "Rate Coefficient (day-1)")#
+  ) +
+  #facet_grid(rows = "regime")+
+  theme(#legend.position = "none",
+        #axis.text.x=element_blank(),
+        #legend.position = c(0.5, 0.7),
+        legend.direction = "horizontal",
+        legend.background = element_rect(fill = NA, color = "black"),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1),
+        #strip.text.y = element_blank(),
+        #axis.title.y.left = element_text(colour="blue"),
+        # axis.title.y.right = element_text(colour="darkgreen"),
+        # axis.text.y.right = element_text(colour="darkgreen"))+
+  )+
+  guides(color=guide_legend(ncol=1))
+
+
+  
+deploy_df_month %>%
+    kbl(caption = "Table 1: Litter Bag Serial Deployment Monthly Average Data for Streams in Coweeta Creek Watershed") %>%
+  kable_classic(full_width = F, html_font = "Arial")
+```
+
+## Linear Mixed-Effects Models
+
+We used the linear mixed-effects model from Cummins et al. (in review) to predict the natural log of breakdown rate (k) based on the streamflow and stream temperature of each reach within our stream network model. The mixed-effect model considers stream temperature (T; as the centered and scaled inverse of temperature multiplied by Boltzmann constant), streamflow (Q; scaled) and the random effects of date deployed and stream site (Equation 1). For the stream network we nulled the random effects of to provide a population-level prediction of litter breakdown rate. 
+
+Eq.(1)    	k ~ T + Q + (1|stream site) + (1|deployment day))
+
+Within this model, the temperature coefficient is different for microbial and shredding macroinvertebrates; however, for this study we look at the combined effect of stream temperature on these two pathways and consider only how stream temperature modifies the merged resultant breakdown flux.   
+
+
+```{r}
+
+### USING SI_LITTER_BREAKDOWN_ANLYASES RMD MARCH 6th 
+# Deployment Data 
+
+acer_shredders <- readRDS("data/acer_shredders.RDS")
+acer_shredders$month_dep <- month(acer_shredders$date_dep)
+rhodo_shredders <- readRDS( "data/rhodo_shredders.RDS")
+rhodo_shredders$month_dep <- month(rhodo_shredders$date_dep)
+rhodo_microbes <- readRDS("data/rhodo_microbes.RDS")
+acer_microbes <- readRDS("data/acer_microbes.RDS")
+
+
+### Values for Scaled Conversions ###
+#output table for network model
+scaled_val_df <- data.frame(type= c("Sh", "M", "Sh", "M"), 
+                            leaf = c("A", "A", "R", "R"), 
+                            avgT = c(mean(acer_shredders$one.k.T), mean(acer_microbes$one.k.T), mean(rhodo_shredders$one.k.T), mean(rhodo_microbes$one.k.T)), 
+                            stdevT = c(sd(acer_shredders$one.k.T), sd(acer_microbes$one.k.T), sd(rhodo_shredders$one.k.T), sd(rhodo_microbes$one.k.T)), 
+                            avgQ = c(mean(acer_shredders$mean_flow),mean(acer_microbes$mean_flow), mean(rhodo_shredders$mean_flow),mean(rhodo_microbes$mean_flow)), 
+                            stdevQ = c(sd(acer_shredders$mean_flow),sd(acer_microbes$mean_flow), sd(rhodo_shredders$mean_flow), sd(rhodo_microbes$mean_flow) ))
+
+saveRDS(scaled_val_df, "data/output/scaled_TQ_df.RDS")
+
+scaled_val_df %>%
+    mutate(across(where(is.numeric), round, 1))
+
+```
+## Model Breakdown Values 
+
+Within the network model, when calculating daily breakdown rate for either microbial or detritivore-meditated breakdown, we set the random effects of the linear mixed effects model to zero, as we are assessing rate predictions at the watershed/population-level thus do not account for the random effect variances. Within the fragmentation breakdown rates, we can observe that there is high sigma of both Rhododendron litter (0.87) and Acer litter (0.40), compared to the near 0 for microbial litter breakdown rate coefficients. 
+
+```{r}
+
+## Analysis 
+# Full linear mixed effect models
+acer_shredder_model <- lmer(log(mean_k) ~ one.k.T.cent + mean_flow_st + (1|stream) + (1|date_dep), data=acer_shredders)
+saveRDS(acer_shredder_model, "data/output/acer_shredder_model.RDS")
+acer_microbes_model <- lmer(log(mean_k) ~ one.k.T.cent + mean_flow_st + (1|stream) + (1|date_dep), data=acer_microbes)
+saveRDS(acer_microbes_model, "data/output/acer_microbes_model.RDS")
+rhodo_shredder_model <- lmer(log(mean_k) ~ one.k.T.cent + mean_flow_st + (1|stream) + (1|date_dep), data=rhodo_shredders)
+saveRDS(rhodo_shredder_model, "data/output/rhodo_shredder_model.RDS")
+rhodo_microbes_model <- lmer(log(mean_k) ~ one.k.T.cent + mean_flow_st + (1|stream) + (1|date_dep), data=rhodo_microbes)
+saveRDS(rhodo_microbes_model, "data/output/rhodo_microbes_model.RDS")
+
+
+## Compare lmer population model to measured data 
+
+input_df <- deploy_df %>%
+  rename(Qout_ls = mean_flow,
+         tempC = mean_temp,
+         date = date_dep)%>%
+  dplyr::filter(Qout_ls < 1366) #Maximum baseflow
+
+
+mod_Foutput <- fragmentation_k_calc(input_df, scaled_val_df, acer_shredder_model, rhodo_shredder_model)%>%
+  dplyr::select(., !contains("."))%>%
+  distinct() %>%
+  mutate(month = month(date)
+  )
+
+k_rates <- left_join(mod_Foutput, microbial_k_calc(input_df, scaled_val_df, acer_microbes_model, rhodo_microbes_model))%>%
+      distinct()
+  
+ggplot(data=mod_Foutput) +
+    geom_point(data=dplyr::filter(mod_Foutput, rhodo_acer == "A"), aes(x=mean_k_shred_new, y=kAF, color = rhodo_acer)) +
+  geom_linerange(data=dplyr::filter(mod_Foutput, rhodo_acer == "A"), aes(x=mean_k_shred_new, y=kAF, ymin=kAF_LCI, ymax=kAF_UCI, color = rhodo_acer)) +
+    geom_linerange(data=dplyr::filter(mod_Foutput, rhodo_acer == "R"), aes(x=mean_k_shred_new, y=kRF, ymin=kRF_LCI, ymax=kRF_UCI, color = rhodo_acer)) +
+        geom_point(data=dplyr::filter(mod_Foutput, rhodo_acer == "R"), aes(x=mean_k_shred_new, y=kRF, color = rhodo_acer))+
+  ggtitle("S4 Figure 5: Detritivore-Meditated Breakdown Rate Re~0'") + 
+  labs(x="Measured Breakdown (/day)", y="lmer Modelled Breakdown w/ 95% CI") +
+  custom_color_type+
+  theme_bw(base_size = 8)+
+  #facet_grid(rows = "regime")+
+  theme(legend.direction = "horizontal",
+        legend.background = element_rect(fill = NA, color = "black"),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1),
+  )+
+  guides(color=guide_legend(ncol=1))+
+  geom_abline(slope = 1, intercept = 0)+
+  ylim(0, 0.05)+
+  xlim(0, 0.05)
+
+lm(kAM~mean_k_fine, dplyr::filter(k_rates, rhodo_acer == "A"))
+
+ggplot(data=k_rates) +
+    geom_point(data=dplyr::filter(k_rates, rhodo_acer == "A"), aes(x=mean_k_fine, y=kAM, color = rhodo_acer)) +
+    geom_point(data=dplyr::filter(k_rates, rhodo_acer == "R"), aes(x=mean_k_fine, y=kRM, color = rhodo_acer))+
+  ggtitle("S4 Figure 4: Microbial-Meditated Breakdown Rate Re~0") + 
+  labs(x=bquote('Measured Breakdown '(day^-1)), y= expression("lmer Modelled Breakdown Rate (day"^"-1"*")")) +
+custom_color_type+
+  theme_bw(base_size = 8)+
+  #facet_grid(rows = "regime")+
+  theme(legend.direction = "horizontal",
+        legend.background = element_rect(fill = NA, color = "black"),
+        axis.text.x = element_text(angle = 45, vjust = 1, hjust=1),
+  )+
+  guides(color=guide_legend(ncol=1))+
+  geom_abline(slope = 1, intercept = 0)
+
+k_rates_A <- k_rates %>%
+  dplyr::filter(rhodo_acer =="A")%>%
+  mutate(Sqresiduals_AM = sqrt(abs(mean_k_fine - kAM)),
+         Sqresiduals_AF = sqrt(abs(mean_k_shred_new - kAF)))%>%
+  summarise(MSE_AM = sum(Sqresiduals_AM, na.rm = TRUE)/ n(),
+            MSE_AF = sum(Sqresiduals_AF, na.rm = TRUE)/ n())
+
+k_rates_R <- k_rates %>%
+  dplyr::filter(rhodo_acer =="R")%>%
+  mutate(Sqresiduals_RM = sqrt(abs(mean_k_fine - kRM)),
+         Sqresiduals_RF = sqrt(abs(mean_k_shred_new - kRF)))%>%
+  summarise(MSE_RM = sum(Sqresiduals_RM, na.rm = TRUE)/ n(),
+            MSE_RF = sum(Sqresiduals_RF, na.rm = TRUE)/ n())
+
+
+
+### Model Results Tables 
+sjPlot::tab_model(acer_shredder_model, 
+                  show.re.var= TRUE, 
+                  pred.labels =c("(Intercept)", "Centered Inverse Boltzmann Temperature ", "Z-Scored Discharge"),
+                  dv.labels= "S4 Table 2: Acer Detritvore LitterBag Breakdown Rate Linear Mixed Effects Model")
+cowplot::plot_grid(qqmath(acer_shredder_model),plot(check_heteroscedasticity(acer_shredder_model)),
+                   align = "h")
+
+
+sjPlot::tab_model(rhodo_shredder_model, 
+                  show.re.var= TRUE, 
+                  pred.labels =c("(Intercept)", "Centered Inverse Boltzmann Temperature ", "Z-Scored Discharge"),
+                  dv.labels= "S4 Table 3: Rhododendron Detritvore LitterBag Breakdown Rate Linear Mixed Effects Model")
+cowplot::plot_grid(qqmath(rhodo_shredder_model),
+plot(check_heteroscedasticity(rhodo_shredder_model)))
+
+sjPlot::tab_model(acer_microbes_model, 
+                  show.re.var= TRUE, 
+                  pred.labels =c("(Intercept)", "Centered Inverse Boltzmann Temperature ", "Z-Scored Discharge"),
+                  dv.labels= "S4 Table 4: Acer Microbial LitterBag Breakdown Rate Linear Mixed Effects Model")
+cowplot::plot_grid(qqmath(acer_microbes_model),
+plot(check_heteroscedasticity(acer_microbes_model)))
+
+sjPlot::tab_model(rhodo_microbes_model, 
+                  show.re.var= TRUE, 
+                  pred.labels =c("(Intercept)", "Centered Inverse Boltzmann Temperature ", "Z-Scored Discharge"),
+                  dv.labels= "S4 Table 5: Rhododendron Microbial LitterBag Breakdown Rate Linear Mixed Effects Model")
+cowplot::plot_grid(qqmath(rhodo_microbes_model),
+plot(check_heteroscedasticity(rhodo_microbes_model)))
+
+```
+
+
+
+
+
+

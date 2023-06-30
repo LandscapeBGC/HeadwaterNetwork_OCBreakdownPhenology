@@ -1,0 +1,254 @@
+---
+title: 'Supplemental Material 2: Baseflow Regression'
+author: "DHare"
+date: "2023-06-22"
+output:
+  html_document:
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,  warning = FALSE, message = FALSE)
+```
+
+
+
+```{r library, include=FALSE}
+source("./packages.R")
+#lapply(list.files("./R", full.names = TRUE), source)
+```
+
+## Baseflow Calculations 
+
+Stream discharge was calculated from 15-min continuous stage data for five sites via stage-discharge rating curve. Daily stream discharge for another 15 sites was provided by the USDA. For all 20 sites, we calculated daily baseflow using the ‘bfi’ function within USGS-R ‘DVstats’ package version 0.3.4. The streamflow and baseflow values for all 20 sites are shown in below. While precipitation and stream flow pulses exert considerable effect on in stream carbon cycles (Jeong et al., 2012; Raymond et al., 2010; Tomczyk et al., 2022), our study considers only baseflow conditions to evaluate the annual continuum rather than punctuated, episodic events. Across the Coweeta Creek Basin baseflow account for 68% of the total flow throughout a year (BFI = 0.678). 
+
+```{r}
+#Landscape Stream Discharge Data
+df_input<- read_csv("data/landscape_discharge_all_dailymeans09012017_12312019_updated01March2021.csv")%>% 
+      dplyr::select(-1)%>%
+      mutate(date = as.Date(date2, format = "%m/%d/%Y"))%>%
+      tidyr::gather(., stream, flow, -c("date", "date2"))%>%
+  dplyr::select(stream, date, flow)
+
+#Landscape Stream Discharge Data
+df_pairedStr <- read_csv("https://raw.github.com/cscummins/Serial-leaf-litter-incubations/master/03_Discharge_Data_Carpentry/CREWS_paireddischarge_all_long_FINAL.csv")%>%
+  mutate(stream = toupper(stream))%>%
+  rename(flow = discharge_ls) %>%
+  #mutate(date = as.Date(as.POSIXct(datetime, format = "%Y-%m-%d %H:%M:%OS")))%>%
+  group_by(stream, date)%>%
+  summarise(flow = mean(flow))%>% #average daily flow
+  dplyr::select(stream, date, flow)%>% 
+  dplyr:: filter(date >= "2018-04-01")
+
+df_input <- rbind(df_input, df_pairedStr)%>%
+  na.omit()
+
+#List Site Names to work through
+station_list <- unique(df_input$stream)
+
+#Create data list for outputvalues
+datalist = list()
+Q_df <- data.frame(matrix(ncol = 4, nrow = 0))
+BFI_value = list()
+
+##BFI calculations(
+for(id in station_list){
+  rm(df, df_bfi, BFI_Score, hh)
+  df <- subset(df_input, df_input$stream == id)
+  df$date <-  as.Date(df$date)
+
+  
+  # Make a dataframe with continuous dates
+  hhfile <- try(
+      hh<- data.frame(date=seq(as.Date(first(df$date)),
+                               as.Date(last(df$date)),
+                               by="days")))
+  # 
+  
+  df <- left_join(hh, df)
+  # # Calculate if any missing dates, will not run if so
+  df$flowFill <- fillMissing(df$flow, max.fill = 30)  
+  #Trim any NAs from the end or beginning - doing this after fill will remove any trailing NAs for data that begins or ends at off times or    throw an error for sets missing more than 2 weeks of data (combined with "fillMissing")
+  df <- df %>% 
+              drop_na(flowFill)
+  
+  #Perform BFI calculation with bfi
+  try(
+    df_bfi <- with(df, 
+                   bfi(flowFill, date, 
+                       by="continuous", 
+                       STAID= stream))
+  )
+  
+  try( df_bfi <- na.omit (df_bfi))#remove rows with NA for stat calculations
+  try( df_bfi$stream <- id)#add site id column to bfi dataframe
+  try( BFI_Score <- round(mean(df_bfi$BaseQ)/mean(df_bfi$Flow), digits = 2))#calculate BFI
+  #try( print(c(id, BFI_Score)))
+  try( row <- (c(id, mean(df_bfi$Flow), sd(df_bfi$Flow), BFI_Score)))
+    #Export Station ID table
+    #write.csv(df_bfi, )
+    
+    # Add to Summarized Output Table
+    #try(df_input <- left_join(df_input,df_bfi, by = c("stream", "date" = "Dates")))
+    try(datalist[[id]] <- df_bfi)
+    try(BFI_value[[id]] <- BFI_Score)
+    try(Q_df <- rbind(Q_df, row))
+}
+
+x <- c("WS_ID", "QAvg", "Qstd", "BFI")
+colnames(Q_df) <- x
+
+#convert value columns from strings to numeric
+Q_df[, 2:4] <- sapply(Q_df[, 2:4], as.numeric)
+
+Q_df %>%
+  kbl(caption = "Baseflow Statistics for Coweeta Creek Watershed") %>%
+  kable_classic(full_width = F, html_font = "Arial")
+
+paste("Average Annual BFI:", round(mean(Q_df$BFI), 3))
+
+
+
+```
+```{r Combining Base Flow Data}
+#Create a streamlind outputdataframe
+df_bfi_output = do.call(rbind, datalist)
+
+#remove columns so spread doesnt cause NA matrix
+drops <- c("TurnPt")#c("Flow","TurnPt")
+baseQ_output <- df_bfi_output[ , !(names(df_bfi_output) %in% drops)]
+baseQ_year<- subset(baseQ_output, Dates>= "2018-10-01" & Dates < "2019-10-01")
+
+baseQ_output <- baseQ_output %>%
+  dplyr::select(-Flow)%>%
+  spread(., key = "stream", value = "BaseQ")%>%
+  mutate(JDate = yday(Dates))
+
+paste("Maximum Annual Outlet Baseflow:", round(max(df_bfi_output$BaseQ), 3))
+
+write.csv(baseQ_output, file = "data/output/BaseFlow_Coweeta.csv")
+saveRDS(baseQ_output, file = "data/output/BaseFlow_Coweeta.RDS")
+write.csv(df_bfi_output, file = "data/output/BaseFlow_Coweeta_Rlong.csv")
+
+baseQ_year_wide <- subset(baseQ_output, Dates>= "2018-10-01" & Dates < "2019-10-01")
+baseQ_year_wide$JulianDay <- format(baseQ_year_wide$Dates, "%j")
+
+colors = c("Streamflow" = "lightblue", "Baseflow" = "blue")
+
+ggplot(baseQ_year) + 
+  geom_line(aes(Dates, Flow, colour = "Streamflow"))+
+    geom_line(aes(Dates, BaseQ, colour = "Baseflow"))+
+  scale_x_date(date_labels = "%b/%y")+
+  theme_bw(base_size = 12)+
+  labs(y = "Streamflow (L/s)", x = "Date")+
+  scale_color_manual(values = colors)+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))+
+    theme_bw(base_size = 9)+
+  scale_x_date(date_labels="%b %Y",date_breaks  ="4 month") +
+    theme(legend.position = "top",
+          axis.text.x = element_text(angle = 45, vjust = 0.9, hjust=1),
+          strip.text.y = element_blank())+
+  labs(x = "", y = "Streamflow (L/sec)", color='') +
+  facet_wrap(~stream, scales = "free_y")+
+    ggtitle("Supplemental Materal 1", subtitle = "2018-2019 Coweeta Creek Streamflow and Baseflow")
+
+
+ggplot(baseQ_year) + 
+  geom_line(aes(Dates, BaseQ, colour = stream))+
+  scale_x_date(date_labels = "%b/%Y")+
+  theme_bw(base_size = 12)+
+  labs(y = "Baseflow (L/s)", x = "Date")
+
+
+```
+
+## Baseflow Accummlation Model
+We used the 20 calculated stream baseflow datasets to derive an empirical linear relationship between contributing stream length to baseflow discharge for each day of the year (1 - 365), with a separate estimate for each subwatershed, as each subwatershed (Shope Fork and Ball Creek; Figure 1A) show different relationships between baseflow and contributing stream length (m). Within the linear model, we set the intercept at 0. This assumes that the stream origination point does not change throughout the year; therefore, each daily regression coefficient represents baseflow per meter of stream length. We use these linear relationships to interpolate an hourly baseflow (m3/hour) for any given day of year at each stream segment by calculating its contributing reach length multiplied by the empirically derived daily baseflow/stream length relationship, plus upgradient contributing stream baseflow. The model parameters and model fits are available below. Our approach allows baseflow to be interpolated based on per meter stream length, not per contributing watershed area, to remove assumptions about groundwater vs. surface water contributing watershed area. 
+
+```{r}
+### Add Watershed ID and details
+sites <- sf::st_read('C:/Users/hared/Dropbox/UConn/Projects/500_NetworkScaleCarbon/540_QGISProjects/CUASHI_DEM/LandscapePoints_network_v2.shp')
+SHP_Fork_Basin <- sf::st_read("C:/Users/hared/OneDrive/Documents/CWT_BasinConstruct.shp")
+SHP_Fork_Basin <- st_transform(SHP_Fork_Basin, crs = st_crs(sites))
+sites_BF <- st_join(SHP_Fork_Basin, sites)
+sites_BF$basin_id[sites_BF$layer == "WS_WS09"] <- "ShopeFork" #"CoweetaCreek" #fix lower watershed
+sites_BF$basin_id[sites_BF$layer == "WS_WS08"] <- "BallCreek"
+
+#Read in iGraph Network
+net <- readRDS("data/spatial/network_intital.RDS")
+nodes <-igraph::as_data_frame(net, what = "vertices")%>%
+  dplyr::filter(!is.na(stream))
+
+#join all the metrics together 
+df_bfi <-  do.call(rbind, datalist) %>%
+  mutate(flow_m3hr = Flow * (60 * 60 / 1000),
+         baseq_m3hr = BaseQ* (60 * 60 / 1000)) %>% #convert ls to m3hr
+drop_na()%>%
+  base::merge(., sites_BF, by.x = "stream", by.y = "stream.y", all.x = TRUE)%>%### Join with basin ###
+  mutate(WS_ID = ifelse(is.na(WS_ID) == TRUE, ifelse(stream == "TOWR", "BallCreek", "ShopeFork"), WS_ID), #ws55 and towr are out of bounds
+         Jdate = yday(Dates),
+         basin_id = NULL) %>%
+  dplyr::filter(!is.na(stream))%>%
+  dplyr::select(-11:-80)%>%
+  merge(., nodes, by.x = "stream", by.y = as.factor("n_lscp_name"))
+
+####################
+library(broom)
+#create linear relationship between length and 
+# create a dataframe that is grouped by date and basin
+by_date <- df_bfi %>%
+  group_by(Jdate, basin_id)%>%
+  mutate(month = month(Dates))
+
+ggplot(by_date, aes(y = baseq_m3hr, x= lengthup_m)) + 
+  geom_point(aes(colour = month)) +
+    stat_smooth(method = "lm", aes(group = month, color= month), linewidth =0.1)+
+  scale_colour_gradient(low = "cyan", high = "black")+
+  theme_bw(base_size = 12)+
+  labs(y = "Predicted Baseflow Q (m3/hr)", x = "Cummlative Upstream Length (m)")+
+    ggtitle("Supplemental Material 2", subtitle = "Observed Baseflow versus Contributing Streamlength Across Coweeta Creek")
+
+
+## outputs slope, intercept, r2, p 
+Q_JDate_lm_m3hr <- do(by_date,
+                            tidy( #tidy #glance #augment
+                              lm(baseq_m3hr ~ lengthup_m + 0, data =.))) #control intercept at 0
+saveRDS(Q_JDate_lm_m3hr, "data/Q_JDate_lm_m3hr.RDS")
+
+Q_JDate_lm_m3hr_glance <- do(by_date,
+                      glance( #augment
+                        lm(baseq_m3hr ~ lengthup_m + 0, data =.))) #control intercept at 0
+
+mod_df <- data.frame(by_date) %>%
+  left_join(., Q_JDate_lm_m3hr, by = c("basin_id", "Jdate"))%>%
+  mutate(predict_BQ = lengthup_m * estimate)
+
+
+#Supplemental Figure
+ggplot(mod_df)+
+  geom_point(aes(x = baseq_m3hr, y = predict_BQ, color = basin_id), size = 0.5)+
+  scale_color_viridis_d(labels=c('Ball Creek','Shope Fork'), name = "Subwatershed")+
+  geom_abline(slope = 1, intercept = 0, color = "blue")+
+  theme_bw(base_size = 12)+
+  labs(y = "Predicted Baseflow Q (m3/hr)", x = "Observed Baseflow Q (m3/hr)")+
+    ggtitle("Supplemental Material 2", subtitle = "Observed vs. Predicted Baseflow Acorss Coweeta Creek")
+
+#Supplemental Table
+Q_JDate_lm_m3hr$term <-"regression coefficient"
+
+Q_Jdate <- left_join(Q_JDate_lm_m3hr, Q_JDate_lm_m3hr_glance, by = c("Jdate", "basin_id"))
+write.csv(Q_Jdate, "data/output/Q_JDate_lm_m3hr.csv")
+```
+
+## Scaling Stream Width
+Stream width was calculated based on the hydraulic geometry scaling relationships of both downstream and “at-a-station” described by Leopold and Maddock (1953) and Catalan et al. (2022) using site-specific parameters derived based on study observations and using downstream scaling parameters used in Helton et al. (2011). Average downstream relationship (Eq.1) was used to inform temporal change at a single location (Eq.2) for a given time (t). These parameters were established by empirical relationships during low-flow stream discharge, with the assumption that channel width increases in proportion to stream discharge. Benthic stream area was then calculated as the stream length multiplied by the daily calculated stream width.     
+![stream width scaling realtionship](images/Width_scaling_img.png)
+
+# Table describing daily baseflow to stream length relationship
+
+```{r}
+Q_JDate_lm_m3hr %>%
+  kbl(caption = "Baseflow Statistics for Coweeta Creek Watershed") %>%
+  kable_classic(full_width = F, html_font = "Arial")
+```
+

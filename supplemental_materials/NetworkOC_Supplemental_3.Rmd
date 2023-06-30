@@ -1,0 +1,190 @@
+---
+title: 'Supplemental Material 3: Stream Temperature'
+author: "DHare"
+date: "2023-06-23"
+output:
+  html_document:
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r library, include=FALSE}
+source("R/packages.R")
+```
+
+
+We used seven annual stream thermal regimes to explore the thermal effect of groundwater and climate warming on breakdown fluxes and standing stock at the stream network scale. For each stream thermal regime scenarios a single daily temperature was used for the entire basin derived from fitting a sinusoid to the air temperature records from the USDA Coweeta Hydrologic Laboratory Meteorologic Station (CS01; Miniat et al. 2015). The air sinusoidal function is described with an amplitude (range of temperatures), phase (day of peak temperature), and mean temperature as the signal parameters (S2: Table 1). We then modified the air annual signal to reflect the hydrologic context by (Hare Chapter 2), these modified were based on numerical heat budget model from (Briggs et al., 2018) assuming a ~40% groundwater contribution. The groundwater contribution scenarios include: (1) air-coupled stream temperature (temperature driven by atmospheric forcings) with an amplitude ratio of 0.95, (2) deep groundwater-fed streams with an amplitude ratio of 0.45, and (3) shallow groundwater-fed streams amplitude ratio of 0.5, and 20-day phase lag. 
+
+[Warming Streams Details]
+
+The Coweeta Observed Stream Temperature thermal regime was generated used measured stream temperature date from Coweeta Hydrologic Laboratory. Stream temperature was recorded with Hobo Onset loggers at 15-min interval for all of the 22 sites (Figure 1D) during 2018-2020 and averaged for daily temperature. Observed Temperature scenario was scaled for the entire stream network model by interpolating daily stream temperature based on the nearest downgradient measured site (n = 22), or in the case of the outlet reaches, when no downstream sites were available nearest upstream was used.
+
+
+```{r}
+# Read in raw temperature files 
+    temp_s <- rbind(read_csv("https://raw.github.com/cscummins/Serial-leaf-litter-incubations/master/02_Temperature_Data_Carpentry/landscape_dailytemp_masterlong_SIyr1.csv"),
+                      read_csv("https://raw.github.com/cscummins/Serial-leaf-litter-incubations/master/02_Temperature_Data_Carpentry/landscape_dailytemp_masterlong_SIyr2.csv")
+    )%>%
+  mutate(tempD = temp.celsius)
+
+############## Air Temperature ###################
+    temp_a <- read_csv("data/cs01_daily.csv")
+
+    temp_a <- dplyr::select(temp_a, c(1:7))
+    temp_a$date<-ymd(paste(temp_a$YEAR, temp_a$MONTH, temp_a$DAY, sep="-"))#converts three date columns to one
+    temp_a$date <- as.Date(temp_a$date, format='%Y-%m-%d')
+    temp_a$tempD <- temp_a$TAVG
+    temp_a$Air_ID <- "CS01"
+    
+    ##Clean up Dataframe
+    temp_a <- dplyr::select(temp_a, c("date", "tempD", "Air_ID"))# tempD for daily temp
+    
+  ## Clip air temp data to stream temp data
+    min_Date <- min(temp_s$date) #minimum date for streams
+    temp_a <- temp_a %>%
+      dplyr::filter(date >= min_Date)%>%
+      rename(ID = "Air_ID")%>%
+      mutate(ID = paste0("Air_", ID))%>%
+      dplyr::filter(ID == "Air_CS01") #only keep CS01 for comparison and watershed derived scenarios (center)
+    
+    
+    temp_s <- temp_s %>%
+            rename(ID = "stream")%>%
+      dplyr::select(ID, date, tempD)
+
+  temp_df <- rbind(temp_a, temp_s)    
+  
+  write.csv(temp_a, "data/output/Air_temperature.csv")
+  write.csv(temp_s, "data/output/Stream_temperature.csv")
+
+```
+
+```{r}
+
+temp_df$ID1 <- temp_df$ID #why does WS_ID get dropped when just one column?!
+
+    temp_sin <- temp_df %>%
+      group_by(ID1) %>%
+      group_map( ~ SinPara(.x))
+
+    res <- bind_rows(temp_sin, .id = "column_label")
+    
+    res$ID2 <- na.locf0(res$ID)
+    
+  temp_sin_res <- res %>%
+      dplyr::select("ID2", "amp", "phase", "ymean", "RSE", "Rsq_adj") %>%
+      na.omit()%>% #remove columns without parameters (remains of my list merging method bind rows)
+      dplyr::filter()%>% 
+      mutate(across(where(is.numeric), round, 1))%>%
+    rename("stream" = ID2)
+    
+    saveRDS(temp_sin_res, "data/output/temp_sin.RDS")
+
+temp_sin_res %>%
+  kbl(caption = "Annual Thermal Regimes for Streams in Coweeta Creek Watershed") %>%
+  kable_classic(full_width = F, html_font = "Arial")   
+
+temp_sin_data <- res %>%
+      dplyr::select("ID", "date", "Tsin.lm", "tempD") %>%
+      na.omit()%>% #remove columns without parameters (remains of my list merging method bind rows)
+      dplyr::filter()%>% 
+      mutate(across(where(is.numeric), round, 1))
+  
+ggplot(temp_sin_data)+
+      geom_point(aes(date, tempD, color = ID), alpha = 0.2)+
+  geom_line(aes(date, Tsin.lm, color = ID))+
+    labs(x= "Date", y = bquote("Temperature"~degree*C))+
+    theme_bw(base_size = 10)
+
+
+ggplot(temp_sin_data)+
+      geom_point(aes(date, tempD, color = ID), alpha = 0.2)+
+      geom_line(aes(date, Tsin.lm), color = "black")+
+    labs(x= "Date", y = bquote("Temperature"~degree*C))+
+    theme_bw(base_size = 9)+
+  scale_x_date(date_labels="%b %Y",date_breaks  ="6 month") +
+    theme(legend.position = "left",
+          axis.text.x = element_text(angle = 45, vjust = 0.9, hjust=1),
+          strip.text.y = element_blank())+
+  facet_wrap(~ID)+
+    ggtitle("Supplemental Material 3", subtitle = "2017-2019 Coweeta Creek Stream and Air Temperature")
+
+  temp_sin_res %>%
+    dplyr::select(1:4)%>%
+    saveRDS(., "data/output/temp_sin.RDS")
+
+```
+
+
+
+```{r}
+
+## Plotting of Syntheic Scenarios
+
+scen_T <- data.frame(ID = c("Coweeta Observed", "Deep GW-fed", "Shallow GW-Fed", "Air-Coupled", "Air-Coupled +2C", "Deep GW-fed +0.5C", "Shallow GW-Fed +2C"),
+                     Amplitude_C = c(round(mean(temp_sin_res$amp),1), 4, 5.5, 9, 9, 4, 5.5),
+                     Phase_days = c(round(mean(temp_sin_res$phase),1), 200, 220, 200, 200, 200, 220),
+                     AnnualMean_C = c(round(mean(temp_sin_res$ymean),1), 12, 12, 13, 15, 12.5, 14))
+
+scen_T %>% 
+  kbl(caption = "Annual Thermal Regimes for Thermal Scenarios") %>%
+  kable_classic(full_width = F, html_font = "Arial")  
+
+scen_data <- data.frame(Jdate = seq(1,365))%>%
+  mutate(rdate = 2*pi*Jdate/365)
+
+#Daily Stream Temperature for each Thermal Scenario
+scen_T_data <- as.data.frame(t(do.call(rbind, lapply(1:nrow(scen_T), function(i){
+  scen_T[i,]$Amplitude_C * cos(scen_data$rdate - scen_T[i,]$Phase_days)+ scen_T[i,]$AnnualMean_C
+  })
+)))
+
+colnames(scen_T_data) <- scen_T$ID
+scen_T_data$JDate <- seq(1,365)
+scen_T_data <- pivot_longer(scen_T_data, cols = -c("JDate"))%>%
+  mutate(name = as.factor(name))
+
+scen_T_data$name <- fct_relevel(scen_T_data$name, levels = c('Coweeta Observed','Shallow GW-Fed','Deep GW-fed', "Air-Coupled",
+                                                "Air-Coupled +2C",'Deep GW-fed +0.5C', 'Shallow GW-Fed +2C')
+  )
+
+# Plot for Comparison
+scen_colors_50 <- c(
+  "black", #base
+  "#fa7e1e", #shalGW
+  "#90a6fd", #deepGW
+  "#d62976", #noGW
+   "#961d53", #noGW2
+    "#394265", #deep0.5
+
+      "#7d3f0f" #shal2
+
+)
+
+#set up legend 
+custom_colors <- scale_colour_manual(name = "Stream Thermal Regime", 
+                                     values = scen_colors_50,
+                                     labels = c('Coweeta Observed','Shallow GW-Fed','Deep GW-Fed', "Air-Coupled",
+                                                "Air-Coupled +2C", 'Deep GW-Fed +0.5C',  'Shallow GW-Fed +2C')
+)
+
+
+
+ggplot(scen_T_data)+
+      geom_line(aes(JDate, value, color = name))+
+    labs(x= "Day of Year", y = bquote("Temperature"~degree*C))+
+    theme_bw(base_size = 9)+
+  #scale_x_date(date_labels="%b %Y",date_breaks  ="6 month") +
+    theme(legend.position = "left",
+          axis.text.x = element_text(angle = 45, vjust = 0.9, hjust=1),
+          strip.text.y = element_blank())+
+  custom_colors+
+  #facet_wrap(~ID)+
+    ggtitle("Figure 1", subtitle = "Modelled Thermal Regime Scenarios")
+
+
+```
+

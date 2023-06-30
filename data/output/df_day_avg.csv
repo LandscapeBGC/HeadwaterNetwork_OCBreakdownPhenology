@@ -1,0 +1,14 @@
+Litter Type ,Thermal Annual Regime,Average Stream Temperature ( C) ,Average Baseflow at Outlet (L s-1),Average Acer Breakdown Rate Coefficient (day-1),Average Rhododendron Breakdown Rate Coefficient (day-1),Average Total Watershed Benthic Area (m2)
+Acer,ShalGW,12.0,2466.4,0.018,0.005,126121.1121
+Acer,DeepGW,12.0,2466.4,0.017,0.005,126121.1121
+Acer,Air Coupled,13.0,2466.4,0.021,0.007,126121.1121
+Acer,Air Coupled +2C,15.0,2466.4,0.024,0.009,126121.1121
+Acer,DeepGW +0.5C,12.5,2466.4,0.018,0.005,126121.1121
+Acer,ShalGW +2C,14.0,2466.4,0.020,0.006,126121.1121
+Rhodo,ShalGW,12.0,2466.4,0.018,0.005,126121.1121
+Rhodo,DeepGW,12.0,2466.4,0.017,0.005,126121.1121
+Rhodo,Air Coupled,13.0,2466.4,0.021,0.007,126121.1121
+Rhodo,Air Coupled +2C,15.0,2466.4,0.024,0.009,126121.1121
+Rhodo,DeepGW +0.5C,12.5,2466.4,0.018,0.005,126121.1121
+Rhodo,ShalGW +2C,14.0,2466.4,0.020,0.006,126121.1121
+Mixed,Base,12.5,2466.4,0.018,0.005,126121.1121
